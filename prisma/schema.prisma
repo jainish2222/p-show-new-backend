@@ -1,0 +1,28 @@
+// Define the PostgreSQL datasource
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Define the generator for Prisma Client
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma model to represent your form data
+model FormData {
+  id                Int      @id @default(autoincrement()) // Primary key
+  email             String    // Email is unique
+  name              String?  // Optional field
+  surname           String?  // Optional field
+  college           String?  // Optional field
+  branch            String?  // Optional field
+  graduationStart   DateTime? // Optional graduation start date
+  graduationEnd     DateTime? // Optional graduation end date
+  projectName       String?  // Optional field
+  projectDescription String?  // Optional field
+  githubLink        String?  // Optional field
+  liveLink          String?  // Optional field
+  img               String   // Image URL, required
+  agreeTerms        Boolean? // Optional field, to store whether user agreed to terms
+}
