@@ -8,10 +8,11 @@ const { createClient } =require('redis');
 const prisma = new PrismaClient();
 
 const client = createClient({
-    password: 'cnVEJhxftxl4AQWKyzuU8uWAHrNSwk14',
+    username: 'default',
+    password: 'O3UX9CAPYevNNGUFN1qs2OJKETuqarD4',
     socket: {
-        host: 'redis-15687.c10.us-east-1-4.ec2.redns.redis-cloud.com',
-        port: 15687
+        host: 'redis-19587.c267.us-east-1-4.ec2.redns.redis-cloud.com',
+        port: 19587
     }
 });
 
