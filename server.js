@@ -1,47 +1,53 @@
-const redis = require('redis');
 const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
-const { createClient } =require('redis');
+const { createClient } = require('redis');
 
 // Initialize Prisma and Redis Clients
 const prisma = new PrismaClient();
 
-const client = createClient({
-    username: 'default',
-    password: 'O3UX9CAPYevNNGUFN1qs2OJKETuqarD4',
-    socket: {
-        host: 'redis-19587.c267.us-east-1-4.ec2.redns.redis-cloud.com',
-        port: 19587
-    }
+const redisClient = createClient({
+  username: 'default',
+  password: 'O3UX9CAPYevNNGUFN1qs2OJKETuqarD4',
+  socket: {
+    host: 'redis-19587.c267.us-east-1-4.ec2.redns.redis-cloud.com',
+    port: 19587,
+  },
 });
 
-client.on('error', (err) => console.error('Redis error:', err));
+// Redis error handling
+redisClient.on('error', (err) => {
+  console.error('Redis Client Error:', err);
+});
 
-// Connect Redis
+// Connect to Redis
 (async () => {
   try {
-    await client.connect();
-    console.log('Connected to Redis');
+    await redisClient.connect();
+    console.log('✅ Connected to Redis');
   } catch (err) {
-    console.error('Redis connection error:', err);
+    console.error('❌ Redis connection failed:', err);
   }
 })();
 
 const app = express();
-app.use(express.json()); // Use express.json() for parsing JSON
+app.use(express.json());
 app.use(cors());
+const PORT = process.env.PORT || 5000;
 
-const PORT = 5000;
+// ---------------- ROUTES ---------------- //
 
-// Submit form data and invalidate cache
-app.post('/submit-form', async (req, res) => {
+app.post('/submit-form', async (req, res, next) => {
   try {
     const {
       email, name, surname, college, branch,
       graduationStart, graduationEnd, projectName,
       projectDescription, githubLink, liveLink, img, agreeTerms
     } = req.body;
+
+    if (!email || !projectName) {
+      return res.status(400).json({ error: 'Email and Project Name are required' });
+    }
 
     const formData = await prisma.formData.create({
       data: {
@@ -52,81 +58,88 @@ app.post('/submit-form', async (req, res) => {
       }
     });
 
-    await client.del('form_data');
-    console.log('Form data submitted, cache cleared');
-    res.json({ formData });
-  } catch (error) {
-    console.error('Error submitting form:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    await redisClient.del('form_data');
+    console.log('✅ Form data submitted, Redis cache cleared');
+    res.status(201).json({ formData });
+  } catch (err) {
+    next(err);
   }
 });
 
-// Fetch form data with Redis caching
-app.get('/fetch-form', async (req, res) => {
+app.get('/fetch-form', async (req, res, next) => {
   try {
-    const cachedData = await client.get('form_data');
-
+    const cachedData = await redisClient.get('form_data');
     if (cachedData) {
-      console.log('Serving form data from Redis cache');
+      console.log('✅ Serving data from Redis cache');
       return res.json(JSON.parse(cachedData));
     }
 
     const formData = await prisma.formData.findMany();
-    await client.setEx('form_data', 200, JSON.stringify(formData));
-    console.log('Fetched form data from database, cached in Redis');
+    await redisClient.setEx('form_data', 200, JSON.stringify(formData));
+    console.log('✅ Fetched from DB and cached');
     res.json(formData);
-  } catch (error) {
-    console.error('Error fetching form data:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+  } catch (err) {
+    next(err);
   }
 });
 
-// Endpoint to get project data by email
-app.get('/fetch-projects/:email', async (req, res) => {
-  const { email } = req.params;
-  
+app.get('/fetch-projects/:email', async (req, res, next) => {
   try {
-    const projects = await prisma.formData.findMany({
-      where: {
-        email: email
-      }
-    });
+    const { email } = req.params;
+    const projects = await prisma.formData.findMany({ where: { email } });
 
-    if (projects.length === 0) {
-      return res.status(404).json({ error: 'No projects found for this email' });
+    if (!projects.length) {
+      return res.status(404).json({ error: 'No projects found' });
     }
 
     res.json(projects);
-  } catch (error) {
-    console.error('Error fetching projects by email:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+  } catch (err) {
+    next(err);
   }
 });
 
-// Endpoint to delete a particular project by ID
-app.delete('/delete-project/:id', async (req, res) => {
-  const { id } = req.params;
-  
+app.delete('/delete-project/:id', async (req, res, next) => {
   try {
-    const project = await prisma.formData.delete({
-      where: {
-        id: Number(id) // Ensure the ID is treated as a number
-      }
-    });
+    const { id } = req.params;
+    const project = await prisma.formData.delete({ where: { id: Number(id) } });
 
-    // Invalidate cache after deletion
-    await client.del('form_data');
-    console.log(`Project with ID ${id} deleted and cache cleared`);
-
-    res.json({ message: 'Project deleted successfully', project });
-  } catch (error) {
-    console.error('Error deleting project:', error);
-    if (error.code === 'P2025') {
+    await redisClient.del('form_data');
+    console.log(`✅ Deleted project ID ${id} and cleared cache`);
+    res.json({ message: 'Deleted', project });
+  } catch (err) {
+    if (err.code === 'P2025') {
       return res.status(404).json({ error: 'Project not found' });
     }
-    res.status(500).json({ error: 'Internal Server Error' });
+    next(err);
   }
 });
 
+// ---------------- GLOBAL ERROR HANDLER ---------------- //
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.use((err, req, res, next) => {
+  console.error('❌ Internal error:', err);
+  res.status(500).json({ error: 'Internal Server Error' });
+});
+
+// ---------------- SERVER LISTEN ---------------- //
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+});
+
+// ---------------- CLEAN EXIT HANDLING ---------------- //
+
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Gracefully shutting down...');
+  await prisma.$disconnect();
+  await redisClient.quit();
+  process.exit(0);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('🔥 Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('🔥 Unhandled Promise Rejection:', reason);
+});
