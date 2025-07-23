@@ -1,34 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
-const { createClient } = require('redis');
 
-// Initialize Prisma and Redis Clients
+// Initialize Prisma Client
 const prisma = new PrismaClient();
-
-const redisClient = createClient({
-  username: 'default',
-  password: 'O3UX9CAPYevNNGUFN1qs2OJKETuqarD4',
-  socket: {
-    host: 'redis-19587.c267.us-east-1-4.ec2.redns.redis-cloud.com',
-    port: 19587,
-  },
-});
-
-// Redis error handling
-redisClient.on('error', (err) => {
-  console.error('Redis Client Error:', err);
-});
-
-// Connect to Redis
-(async () => {
-  try {
-    await redisClient.connect();
-    console.log('✅ Connected to Redis');
-  } catch (err) {
-    console.error('❌ Redis connection failed:', err);
-  }
-})();
 
 const app = express();
 app.use(express.json());
@@ -58,8 +33,7 @@ app.post('/submit-form', async (req, res, next) => {
       }
     });
 
-    await redisClient.del('form_data');
-    console.log('✅ Form data submitted, Redis cache cleared');
+    console.log('✅ Form data submitted');
     res.status(201).json({ formData });
   } catch (err) {
     next(err);
@@ -68,15 +42,8 @@ app.post('/submit-form', async (req, res, next) => {
 
 app.get('/fetch-form', async (req, res, next) => {
   try {
-    const cachedData = await redisClient.get('form_data');
-    if (cachedData) {
-      console.log('✅ Serving data from Redis cache');
-      return res.json(JSON.parse(cachedData));
-    }
-
     const formData = await prisma.formData.findMany();
-    await redisClient.setEx('form_data', 200, JSON.stringify(formData));
-    console.log('✅ Fetched from DB and cached');
+    console.log('✅ Fetched form data from DB');
     res.json(formData);
   } catch (err) {
     next(err);
@@ -103,8 +70,7 @@ app.delete('/delete-project/:id', async (req, res, next) => {
     const { id } = req.params;
     const project = await prisma.formData.delete({ where: { id: Number(id) } });
 
-    await redisClient.del('form_data');
-    console.log(`✅ Deleted project ID ${id} and cleared cache`);
+    console.log(`✅ Deleted project ID ${id}`);
     res.json({ message: 'Deleted', project });
   } catch (err) {
     if (err.code === 'P2025') {
@@ -132,7 +98,6 @@ app.listen(PORT, () => {
 process.on('SIGINT', async () => {
   console.log('\n🛑 Gracefully shutting down...');
   await prisma.$disconnect();
-  await redisClient.quit();
   process.exit(0);
 });
 
